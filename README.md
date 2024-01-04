@@ -15,5 +15,7 @@ Data was cleaned and preprocessed before using "limma" to perform differential e
 Differentially expressed genes were also found through using GEO2R, _____. These results were compared with the original R analysis genes, in order to find the top 250 genes (sorted by P-Value) to be differentially expressed
 
 
-
+## Results
+Full list of genes can be found in the significant_genes.csv file. 
+Top 250 Genes were used to perform functional enrichment analysis with DAVID and Metascape. 
 
