@@ -1,87 +1,95 @@
-install.packages("BiocManager")
-install.packages("forcats")
-install.packages("stringr")
-install.packages("readr")
-install.packages("tidyr")
-install.packages("survminer")
-BiocManager::install("limma")
-BiocManager::install("org.Hs.eg.db")
-BiocManager::install("GEOquery")
+  install.packages("BiocManager")
+  install.packages("forcats")
+  install.packages("stringr")
+  install.packages("readr")
+  install.packages("tidyr")
+  install.packages("survminer")
+  BiocManager::install("limma")
+  BiocManager::install("org.Hs.eg.db")
+  BiocManager::install("GEOquery")
+  BiocManager::install("pheatmap")
+
 library(GEOquery)
-my_id <- "GSE50161"
-gse <- getGEO(my_id)
-length(gse)
-gse <- gse[[1]]
-gse
-summary(exprs(gse))
-
-exprs(gse) <- log2(exprs(gse))
-boxplot(exprs(gse),outline=FALSE)
 library(dplyr)
-sampleInfo <- pData(gse)
-sampleInfo <- select(sampleInfo, source_name_ch1,characteristics_ch1.1)
-sampleInfo <- rename(sampleInfo, group=source_name_ch1, patient=characteristics_ch1.1)
-sampleInfo
-
-
-BiocManager::install("pheatmap")
-library(pheatmap)
-corMatrix <- cor(exprs(gse),use="c")
-pheatmap(corMatrix)
-rownames(sampleInfo)
-colnames(corMatrix)
-
-rownames(sampleInfo) <- colnames(corMatrix)
-pheatmap(corMatrix,
-         annotation_col=sampleInfo) 
-
-
-library(readr)
-full_output <- cbind(fData(gse),exprs(gse))
-write_csv(full_output, "gse_full_output.csv")
-features <- fData(gse)
-View(features)
 library(limma)
+library(pheatmap)
+library(ggplot2)
+library(readr)
+
+my_id <- "GSE50161"
+gse <- getGEO(my_id)[[1]]
+exprs(gse) <- log2(exprs(gse))
+
+dev.new()
+boxplot(exprs(gse), outline=FALSE)
+
+sampleInfo <- pData(gse) %>%
+  select(source_name_ch1, characteristics_ch1.1) %>%
+  rename(group=source_name_ch1, patient=characteristics_ch1.1)
+
+# diff exprs 1
 design <- model.matrix(~0+sampleInfo$patient)
-design 
 colnames(design) <- make.names(colnames(design))
-summary(exprs(gse))
-design
-
-cutoff <- median(exprs(gse))
-
-## is gene expressed in sample
-is_expressed <- exprs(gse) > cutoff
-
-## identify genes expressed in 2+ samples
-
-keep <- rowSums(is_expressed) > 2
-
-table(keep)
-
-gse <- gse[keep,]
 
 fit <- lmFit(exprs(gse), design)
-head(fit$coefficients)
-contrasts <- makeContrasts(sampleInfo.patienttissue..medulloblastoma - sampleInfo.patienttissue..medulla, levels=design)
+contrasts <- makeContrasts(Diff = sampleInfo.patienttissue..medulloblastoma - sampleInfo.patienttissue..medulla, levels=design)
 fit2 <- contrasts.fit(fit, contrasts)
 fit2 <- eBayes(fit2)
-topTable(fit2)
-topTable(fit2, coef=1)
-anno <- fData(gse)
-anno
-print("hello everyone")
-full_results <- topTable(fit2, number=Inf)
-full_results <- tibble::rownames_to_column(full_results,"ID")
 
-library(ggplot2)
-ggplot(full_results,aes(x = logFC, y=B)) + geom_point()
 
+full_results <- topTable(fit2, number=Inf) %>%
+  tibble::rownames_to_column("ID")
+
+write_csv(full_results, "gse_full_output.csv")
 
 p_cutoff <- 0.05
 fc_cutoff <- 1
 
-full_results %>% 
-  mutate(Significant = adj.P.Val < p_cutoff, abs(logFC) > fc_cutoff ) %>% 
-  ggplot(aes(x = logFC, y = B, col=Significant)) + geom_point()
+full_results %>%
+  mutate(Significant = adj.P.Val < p_cutoff, abs(logFC) > fc_cutoff) %>%
+  ggplot(aes(x = logFC, y = B, col = Significant)) + geom_point()
 
+
+full_results_csv <- read_csv("gse_full_output.csv")
+View(full_results_csv)
+
+# randomForest 
+
+
+library(randomForest)
+install.packages("caret")
+library(caret)
+
+data <- exprs(gse)
+labels <- factor(sampleInfo$group) 
+
+set.seed(123) 
+trainIndex <- createDataPartition(labels, p = 0.8, list = FALSE)
+trainData <- data[trainIndex, ]
+testData <- data[-trainIndex, ]
+trainLabels <- labels[trainIndex]
+testLabels <- labels[-trainIndex]
+
+rf_model <- randomForest(x = trainData, y = trainLabels, ntree = 500, importance = TRUE)
+
+rf_predictions <- predict(rf_model, testData)
+confusionMatrix(rf_predictions, testLabels)
+
+importance_scores <- importance(rf_model)
+top_genes <- head(sort(importance_scores, decreasing = TRUE), 250) # Adjust the number as needed
+
+View(top_genes)
+print(top_genes)
+importance_scores <- importance(rf_model)
+
+top_genes_scores <- sort(importance_scores[, "MeanDecreaseAccuracy"], decreasing = TRUE)[1:100]
+
+names(top_genes_scores) <- rownames(importance_scores)[order(importance_scores[, "MeanDecreaseAccuracy"], decreasing = TRUE)][1:100]
+
+top_genes_df <- data.frame(Gene = names(top_genes_scores), Importance = top_genes_scores)
+
+write.csv(top_genes_df, "top_genes.csv", row.names = FALSE)
+top_genes_df <- read.csv("top_genes.csv")
+head(top_genes_df)
+tail(top_genes_df)
+View(top_genes_df)
